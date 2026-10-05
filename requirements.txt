@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pika
+httpx
+psycopg[binary,pool]
+pydantic

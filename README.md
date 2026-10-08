@@ -93,19 +93,24 @@ python scripts/fire_events.py -n 1000
 python scripts/verify.py                  # reconciles Postgres, RabbitMQ and the mock client
 ```
 
-Result (1 worker):
+The test was run twice on a single local machine (everything in Docker or local processes), once with 1 worker and once with 3 workers (`python -m app.worker` in three terminals).
 
-| Metric | Result |
-|---|---|
-| Delivered (`DELIVERED`) | 962 |
-| Dead-lettered (`FAILED`, 5 attempts each) | 38, all found in `webhook_dlq` |
-| Stuck / lost | 0 |
-| Total HTTP attempts | 2,012 (avg 2.01 per event) |
-| Duplicate deliveries | 0 (client saw 962 successes for 962 `DELIVERED` rows) |
-| Latency created to delivered | p50 26.5s, p95 59s, p99 75s |
+| Metric | 1 worker | 3 workers |
+|---|---|---|
+| Delivered (`DELIVERED`) | 962 | 979 |
+| Dead-lettered (all found in `webhook_dlq`) | 38 | 21 |
+| Stuck / lost | 0 | 0 |
+| Total HTTP attempts | 2,012 | 1,918 |
+| Duplicate deliveries | 0 | 0 |
+| Latency p50 | 26.5s | 9.0s |
+| Latency p95 | 59.1s | 27.7s |
+| Latency p99 | 75.0s | 44.2s |
 
-The expected dead-letter rate is 0.5^5, about 3.1%; the observed 3.8% is within normal variance. Latency here includes the backoff delays plus queueing behind a single worker, so it reflects worker capacity rather than the cost of one delivery. `verify.py` matches each `FAILED` row's ID against the actual messages in `webhook_dlq`, so it confirms the payloads are recoverable, not just that the counts match.
+Going from 1 to 3 workers cut p50 latency about 3x and p95 about 2x. The tail improves less because it is largely set by the backoff schedule: a delivery that needs 5 attempts waits at least 2+4+8+16 = 30s by design. Latency here is therefore backoff delay plus queueing behind the workers, not the cost of a single delivery.
 
+The delivered/dead-lettered split varies between runs because failures are random. A delivery is dead-lettered only if all 5 attempts fail, so the expected rate is 0.5^5, about 3.1%.
+
+`verify.py` matches each `FAILED` row's ID against the actual messages in `webhook_dlq`, so it confirms the payloads are recoverable, not just that the counts match. It also compares the mock client's count of `200` responses to the `DELIVERED` rows to confirm there were no duplicate deliveries.
 ## Project layout
 
 ```
@@ -129,3 +134,6 @@ scripts/         fire_events.py, verify.py, reset.py
 - `httpx` timeouts apply per phase (connect/read/write), not as one hard total deadline.
 - Only `PENDING` rows are swept; the retry path relies on RabbitMQ redelivery.
 - No automated test suite; verification is the end-to-end `verify.py` reconciliation.
+
+
+"Built as a learning project to explore reliable messaging patterns"
